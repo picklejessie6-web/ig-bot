@@ -1,4 +1,3 @@
-echo instagrapi > requirements.txt
-echo discord.py >> requirements.txt
-echo httpx >> requirements.txt
-notepad requirements.txt
+discord.py
+instagrapi
+httpx
