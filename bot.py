@@ -36,7 +36,7 @@ ig_client = Client()
 # ── INSTAGRAM LOGIN ───────────────────────────────────────────────────────────
 
 def ig_login():
-    ig_client.set_proxy("http://bytlvdsl:7x6y437b8smy@23.95.150.145:6114")
+    ig_client.set_proxy("http://bytlvdsl:7x6y437b8smy@198.23.239.134:6540")
     if Path(SESSION_FILE).exists():
         try:
             ig_client.load_settings(SESSION_FILE)
