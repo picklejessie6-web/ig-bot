@@ -7,6 +7,7 @@ import sys
 import json
 import asyncio
 import httpx
+import random
 from datetime import datetime, timezone
 from pathlib import Path
 from instagrapi import Client
@@ -31,6 +32,8 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 ig_client = Client()
+# Add a random delay between requests to avoid triggering rate limits
+ig_client.delay_range = [3, 7]
 
 
 # ── INSTAGRAM LOGIN ───────────────────────────────────────────────────────────
@@ -74,14 +77,20 @@ async def fetch_posts():
 
         def _fetch():
             try:
-                user_id = ig_client.user_id_from_username(INSTAGRAM_USERNAME)
-                medias = ig_client.user_medias(user_id, amount=12)
+                # Use the private/authenticated API directly — avoids public 429s
+                user_info = ig_client.user_info_by_username_v1(INSTAGRAM_USERNAME)
+                user_id = user_info.pk
+                medias = ig_client.user_medias_v1(user_id, amount=12)
                 return medias
             except LoginRequired:
                 print("[WARN] Login required, re-logging in...")
                 ig_login()
-                user_id = ig_client.user_id_from_username(INSTAGRAM_USERNAME)
-                return ig_client.user_medias(user_id, amount=12)
+                user_info = ig_client.user_info_by_username_v1(INSTAGRAM_USERNAME)
+                user_id = user_info.pk
+                return ig_client.user_medias_v1(user_id, amount=12)
+            except Exception as e:
+                print(f"[ERROR] _fetch failed: {e}")
+                raise
 
         medias = await loop.run_in_executor(None, _fetch)
 
@@ -211,6 +220,11 @@ async def poll_instagram():
     if channel is None:
         print(f"[ERROR] Channel {CHANNEL_ID} not found.")
         return
+
+    # Random jitter so Railway restarts don't hammer IG at the exact same second
+    jitter = random.uniform(5, 30)
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Waiting {jitter:.1f}s before checking @{INSTAGRAM_USERNAME}...")
+    await asyncio.sleep(jitter)
 
     print(f"[{datetime.now().strftime('%H:%M:%S')}] Checking @{INSTAGRAM_USERNAME}...")
 
