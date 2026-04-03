@@ -147,25 +147,32 @@ async def download_media(url: str, dest: Path) -> bool:
 
 # ── EMBED BUILDER ─────────────────────────────────────────────────────────────
 
-def build_embed(post: dict) -> discord.Embed:
-    embed = discord.Embed(color=0x000000)
-    embed.set_author(
-        name=f"@{INSTAGRAM_USERNAME}",
-        url=f"https://www.instagram.com/{INSTAGRAM_USERNAME}/",
-    )
+class LinkButton(discord.ui.View):
+    def __init__(self, url: str):
+        super().__init__()
+        self.add_item(discord.ui.Button(label="Open Post", url=url, emoji="🔗"))
+
+
+def build_embed(post: dict) -> tuple[discord.Embed, discord.ui.View]:
+    post_url = f"https://www.instagram.com/p/{post['shortcode']}/"
+
+    timestamp_str = f"<t:{post['timestamp']}:R>"
 
     caption = post.get("caption", "")
-    if caption:
-        trimmed = caption[:300] + ("…" if len(caption) > 300 else "")
-        embed.description = trimmed
+    trimmed_caption = caption[:300] + ("…" if len(caption) > 300 else "") if caption else "_No caption_"
 
-    embed.add_field(
-        name="",
-        value=f"[Here](https://www.instagram.com/p/{post['shortcode']}/)",
-        inline=False
+    description = (
+        f"👤 **@{INSTAGRAM_USERNAME}** {timestamp_str}\n"
+        f"\u200b\n"
+        f"📝 {trimmed_caption}\n"
+        f"\u200b\n"
+        f"🔗 Link ⬇️"
     )
 
-    return embed
+    embed = discord.Embed(description=description, color=0x000000)
+    view = LinkButton(post_url)
+
+    return embed, view
 
 
 # ── POST SENDER ───────────────────────────────────────────────────────────────
@@ -182,14 +189,14 @@ async def send_post(channel: discord.TextChannel, post: dict):
         if success:
             files.append(discord.File(str(dest)))
 
-    embed = build_embed(post)
+    embed, view = build_embed(post)
 
     if files:
-        await channel.send(embed=embed, files=files)
+        await channel.send(embed=embed, view=view, files=files)
     else:
         if post.get("thumbnail"):
             embed.set_image(url=post["thumbnail"])
-        await channel.send(embed=embed)
+        await channel.send(embed=embed, view=view)
 
     for p in post_dir.iterdir():
         p.unlink()
