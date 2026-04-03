@@ -150,16 +150,14 @@ async def download_media(url: str, dest: Path) -> bool:
 class LinkButton(discord.ui.View):
     def __init__(self, url: str):
         super().__init__()
-        self.add_item(discord.ui.Button(label="Open Post", url=url, emoji="🔗"))
+        self.add_item(discord.ui.Button(label="\u200b", url=url, emoji="🔗"))
 
 
 def build_embed(post: dict) -> tuple[discord.Embed, discord.ui.View]:
     post_url = f"https://www.instagram.com/p/{post['shortcode']}/"
-
     timestamp_str = f"<t:{post['timestamp']}:R>"
-
     caption = post.get("caption", "")
-    trimmed_caption = caption[:300] + ("…" if len(caption) > 300 else "") if caption else "_No caption_"
+    trimmed_caption = (caption[:300] + ("…" if len(caption) > 300 else "")) if caption else "_No caption_"
 
     description = (
         f"👤 **@{INSTAGRAM_USERNAME}** {timestamp_str}\n"
@@ -171,7 +169,6 @@ def build_embed(post: dict) -> tuple[discord.Embed, discord.ui.View]:
 
     embed = discord.Embed(description=description, color=0x000000)
     view = LinkButton(post_url)
-
     return embed, view
 
 
@@ -200,7 +197,10 @@ async def send_post(channel: discord.TextChannel, post: dict):
 
     for p in post_dir.iterdir():
         p.unlink()
-    post_dir.rmdir()
+    try:
+        post_dir.rmdir()
+    except Exception:
+        pass
 
 
 # ── POLLING TASK ──────────────────────────────────────────────────────────────
