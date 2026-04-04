@@ -62,11 +62,13 @@ def ig_login():
         except Exception as e:
             print(f"[WARN] Saved session invalid ({e}), falling back to session ID login...")
 
-    # Login via session ID — avoids password encryption which Railway IP blocks
+    # Login via session ID — inject cookie directly, bypassing broken login_by_sessionid
     if IG_SESSIONID:
-        print("[INFO] Logging in via session ID...")
+        print("[INFO] Logging in via session ID cookie injection...")
         fresh_client = make_client()
-        fresh_client.login_by_sessionid(IG_SESSIONID)
+        fresh_client.set_settings({})
+        fresh_client.set_sessionid(IG_SESSIONID)
+        fresh_client.get_timeline_feed()  # verify it works
         ig_client = fresh_client
         session_data = json.dumps(ig_client.get_settings())
         print("[INFO] Session ID login successful.")
