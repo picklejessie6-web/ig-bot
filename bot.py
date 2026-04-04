@@ -18,6 +18,7 @@ os.environ["PYTHONUNBUFFERED"] = "1"
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 DISCORD_TOKEN      = os.environ["DISCORD_TOKEN"]
 IG_USERNAME        = os.environ["IG_USERNAME"]
+IG_SESSIONID       = os.environ.get("IG_SESSIONID", "")
 IG_PASSWORD        = os.environ["IG_PASSWORD"]
 INSTAGRAM_USERNAME = "ninevet2"
 INSTAGRAM_USER_ID  = "5816395975"
@@ -59,8 +60,21 @@ def ig_login():
             print("[WARN] Session valid but Instagram is rate-limiting — will retry at fetch time")
             return
         except Exception as e:
-            print(f"[WARN] Saved session invalid ({e}), falling back to fresh login...")
+            print(f"[WARN] Saved session invalid ({e}), falling back to session ID login...")
 
+    # Login via session ID — avoids password encryption which Railway IP blocks
+    if IG_SESSIONID:
+        print("[INFO] Logging in via session ID...")
+        fresh_client = make_client()
+        fresh_client.login_by_sessionid(IG_SESSIONID)
+        ig_client = fresh_client
+        session_data = json.dumps(ig_client.get_settings())
+        print("[INFO] Session ID login successful.")
+        print("[ACTION REQUIRED] Set this in Railway → Variables as IG_SESSION:")
+        print(session_data)
+        return
+
+    # Fallback: fresh username/password login
     print("[INFO] Performing fresh login (no valid session found)...")
     fresh_client = make_client()
     fresh_client.login(IG_USERNAME, IG_PASSWORD)
