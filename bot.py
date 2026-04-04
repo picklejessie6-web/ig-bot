@@ -94,11 +94,12 @@ def ig_login(force_new_proxy: bool = False):
         except Exception as e:
             print(f"[WARN] Saved session invalid ({e}), falling back to fresh login...")
 
-    # Fresh login path — rebuild client cleanly before attempting
+    # Fresh login path — only replace global client once login fully succeeds
     print("[INFO] Performing fresh login (no valid session found)...")
-    ig_client = make_client()
-    ig_client.set_proxy(_active_proxy)
-    ig_client.login(IG_USERNAME, IG_PASSWORD)
+    fresh_client = make_client()
+    fresh_client.set_proxy(_active_proxy)
+    fresh_client.login(IG_USERNAME, IG_PASSWORD)
+    ig_client = fresh_client  # only assign if no exception above
     session_data = json.dumps(ig_client.get_settings())
     print("[INFO] Fresh login successful.")
     print("[ACTION REQUIRED] Set this in Railway → Variables as IG_SESSION:")
@@ -369,9 +370,10 @@ async def on_ready():
     print(f"Watching @{INSTAGRAM_USERNAME} every {POLL_INTERVAL_MIN}–{POLL_INTERVAL_MAX} min (randomised)")
     try:
         ig_login()
+        poll_instagram.start()
     except Exception as e:
         print(f"[ERROR] Instagram login failed: {e}")
-    poll_instagram.start()
+        print("[ERROR] Polling NOT started — fix the Instagram login first, then redeploy.")
 
 
 # ── ENTRY POINT ───────────────────────────────────────────────────────────────
