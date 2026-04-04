@@ -21,7 +21,8 @@ IG_USERNAME        = os.environ["IG_USERNAME"]
 IG_PASSWORD        = os.environ["IG_PASSWORD"]
 INSTAGRAM_USERNAME = "ninevet2"
 CHANNEL_ID         = 1488596316446527739
-POLL_INTERVAL_MINS = 15
+POLL_INTERVAL_MIN  = 20   # randomised between these two values
+POLL_INTERVAL_MAX  = 60
 STATE_FILE         = "last_post.json"
 DOWNLOAD_DIR       = "ig_downloads"
 SESSION_FILE       = "ig_session.json"
@@ -80,7 +81,7 @@ async def fetch_posts():
                 # Use the private/authenticated API directly — avoids public 429s
                 user_info = ig_client.user_info_by_username_v1(INSTAGRAM_USERNAME)
                 user_id = user_info.pk
-                medias = ig_client.user_medias_v1(user_id, amount=12)
+                medias = ig_client.user_medias_v1(user_id, amount=5)
                 return medias
             except LoginRequired:
                 print("[WARN] Login required, re-logging in...")
@@ -214,17 +215,24 @@ async def send_post(channel: discord.TextChannel, post: dict):
 
 # ── POLLING TASK ──────────────────────────────────────────────────────────────
 
-@tasks.loop(minutes=POLL_INTERVAL_MINS)
+@tasks.loop(minutes=1)  # ticks every minute; logic below controls actual firing
 async def poll_instagram():
+    # Only fire when the internal countdown hits zero
+    if not hasattr(poll_instagram, "_next_run"):
+        poll_instagram._next_run = datetime.now(tz=timezone.utc).timestamp()
+
+    now = datetime.now(tz=timezone.utc).timestamp()
+    if now < poll_instagram._next_run:
+        return  # not yet time
+
+    # Schedule the next run before doing any work
+    next_wait = random.uniform(POLL_INTERVAL_MIN * 60, POLL_INTERVAL_MAX * 60)
+    poll_instagram._next_run = now + next_wait
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Next check in {next_wait/60:.1f} min")
     channel = bot.get_channel(CHANNEL_ID)
     if channel is None:
         print(f"[ERROR] Channel {CHANNEL_ID} not found.")
         return
-
-    # Random jitter so Railway restarts don't hammer IG at the exact same second
-    jitter = random.uniform(5, 30)
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] Waiting {jitter:.1f}s before checking @{INSTAGRAM_USERNAME}...")
-    await asyncio.sleep(jitter)
 
     print(f"[{datetime.now().strftime('%H:%M:%S')}] Checking @{INSTAGRAM_USERNAME}...")
 
@@ -308,7 +316,7 @@ async def testpost(ctx):
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} ({bot.user.id})")
-    print(f"Watching @{INSTAGRAM_USERNAME} every {POLL_INTERVAL_MINS} min(s)")
+    print(f"Watching @{INSTAGRAM_USERNAME} every {POLL_INTERVAL_MIN}–{POLL_INTERVAL_MAX} min (randomised)")
     try:
         ig_login()
     except Exception as e:
