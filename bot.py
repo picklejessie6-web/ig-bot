@@ -332,7 +332,9 @@ async def on_ready():
         ig_login()
         poll_instagram.start()
     except Exception as e:
+        import traceback
         print(f"[ERROR] Instagram login failed: {e}")
+        traceback.print_exc()
         print("[ERROR] Polling NOT started — fix the Instagram login first, then redeploy.")
 
 
