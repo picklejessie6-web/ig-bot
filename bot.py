@@ -20,6 +20,7 @@ DISCORD_TOKEN      = os.environ["DISCORD_TOKEN"]
 IG_USERNAME        = os.environ["IG_USERNAME"]
 IG_PASSWORD        = os.environ["IG_PASSWORD"]
 INSTAGRAM_USERNAME = "ninevet2"
+INSTAGRAM_USER_ID  = "5816395975"
 CHANNEL_ID         = 1488596316446527739
 POLL_INTERVAL_MIN  = 20   # randomised between these two values
 POLL_INTERVAL_MAX  = 60
@@ -90,19 +91,14 @@ async def fetch_posts():
     try:
         loop = asyncio.get_event_loop()
 
-        def _fetch():
+       def _fetch():
             try:
-                # Use the private/authenticated API directly — avoids public 429s
-                user_info = ig_client.user_info_by_username_v1(INSTAGRAM_USERNAME)
-                user_id = user_info.pk
-                medias = ig_client.user_medias_v1(user_id, amount=5)
+                medias = ig_client.user_medias_v1(INSTAGRAM_USER_ID, amount=5)
                 return medias
             except LoginRequired:
                 print("[WARN] Login required, re-logging in...")
                 ig_login()
-                user_info = ig_client.user_info_by_username_v1(INSTAGRAM_USERNAME)
-                user_id = user_info.pk
-                return ig_client.user_medias_v1(user_id, amount=12)
+                return ig_client.user_medias_v1(INSTAGRAM_USER_ID, amount=5)
             except Exception as e:
                 print(f"[ERROR] _fetch failed: {e}")
                 raise
