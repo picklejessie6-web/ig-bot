@@ -5,13 +5,14 @@ from discord.ext import commands, tasks
 import os
 import sys
 import json
+import time
 import asyncio
 import httpx
 import random
 from datetime import datetime, timezone
 from pathlib import Path
 from instagrapi import Client
-from instagrapi.exceptions import LoginRequired
+from instagrapi.exceptions import LoginRequired, PleaseWaitFewMinutes
 
 os.environ["PYTHONUNBUFFERED"] = "1"
 
@@ -22,7 +23,7 @@ IG_PASSWORD        = os.environ["IG_PASSWORD"]
 INSTAGRAM_USERNAME = "ninevet2"
 INSTAGRAM_USER_ID  = "5816395975"
 CHANNEL_ID         = 1488596316446527739
-POLL_INTERVAL_MIN  = 20   # randomised between these two values
+POLL_INTERVAL_MIN  = 20
 POLL_INTERVAL_MAX  = 60
 STATE_FILE         = "last_post.json"
 DOWNLOAD_DIR       = "ig_downloads"
@@ -34,11 +35,7 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 ig_client = Client()
-# Add a random delay between requests to avoid triggering rate limits
 ig_client.delay_range = [3, 7]
-
-
-# ── INSTAGRAM LOGIN ───────────────────────────────────────────────────────────
 
 PROXIES = [
     "http://bytlvdsl:7x6y437b8smy@31.58.9.4:6077",
@@ -50,37 +47,55 @@ PROXIES = [
     "http://bytlvdsl:7x6y437b8smy@45.38.107.97:6014",
 ]
 
-# Sticky proxy — chosen once at startup, never rotated mid-session
+# Sticky proxy — chosen once at startup, only rotated on explicit failure
 _active_proxy = random.choice(PROXIES)
+
 
 # ── INSTAGRAM LOGIN ───────────────────────────────────────────────────────────
 
 def ig_login(force_new_proxy: bool = False):
+    """
+    Login strategy:
+      1. If IG_SESSION env var exists and we're not forcing a new proxy,
+         restore the session WITHOUT calling .login() again — just load
+         settings and verify with a lightweight API call.
+      2. Only do a full fresh .login() if there's no saved session or
+         the session is stale/invalid.
+    """
     global _active_proxy
+
     if force_new_proxy:
         _active_proxy = random.choice(PROXIES)
         print(f"[INFO] Rotating to new proxy: {_active_proxy.split('@')[1]}")
     else:
         print(f"[INFO] Using proxy: {_active_proxy.split('@')[1]}")
+
     ig_client.set_proxy(_active_proxy)
 
-    # Try restoring session from environment variable (survives Railway restarts)
     session_json = os.environ.get("IG_SESSION")
     if session_json and not force_new_proxy:
         try:
-            ig_client.set_settings(json.loads(session_json))
-            ig_client.login(IG_USERNAME, IG_PASSWORD)
+            settings = json.loads(session_json)
+            ig_client.set_settings(settings)
+            # DO NOT call ig_client.login() here — that creates a new device
+            # session and triggers Instagram's "please wait" challenge.
+            # Instead just poke a cheap endpoint to verify the cookie is alive.
             ig_client.get_timeline_feed()
-            print("[INFO] Logged in via session from environment variable")
+            print("[INFO] Session restored from IG_SESSION env var — no fresh login needed")
+            return
+        except PleaseWaitFewMinutes:
+            print("[WARN] Session valid but Instagram is rate-limiting — will retry at fetch time")
             return
         except Exception as e:
-            print(f"[WARN] Env session login failed: {e}, retrying fresh...")
+            print(f"[WARN] Saved session invalid ({e}), doing fresh login...")
+            ig_client.set_settings({})  # wipe stale state before fresh login
 
+    # Fresh login — only runs when there's no valid session
     ig_client.login(IG_USERNAME, IG_PASSWORD)
     session_data = json.dumps(ig_client.get_settings())
-    print("[INFO] Logged in fresh — copy the following into Railway as IG_SESSION env var:")
+    print("[INFO] Fresh login successful.")
+    print("[ACTION REQUIRED] Add this to Railway as the IG_SESSION environment variable:")
     print(f"IG_SESSION={session_data}")
-    ig_client.dump_settings(SESSION_FILE)
 
 
 # ── STATE HELPERS ─────────────────────────────────────────────────────────────
@@ -104,16 +119,23 @@ async def fetch_posts():
         loop = asyncio.get_event_loop()
 
         def _fetch():
-            try:
-                medias = ig_client.user_medias_v1(INSTAGRAM_USER_ID, amount=5)
-                return medias
-            except LoginRequired:
-                print("[WARN] Login required, rotating proxy and re-logging in...")
-                ig_login(force_new_proxy=True)
-                return ig_client.user_medias_v1(INSTAGRAM_USER_ID, amount=5)
-            except Exception as e:
-                print(f"[ERROR] _fetch failed: {e}")
-                raise
+            # Retry loop for PleaseWaitFewMinutes (Instagram rate-limit, not auth failure)
+            for attempt in range(3):
+                try:
+                    medias = ig_client.user_medias_v1(INSTAGRAM_USER_ID, amount=5)
+                    return medias
+                except PleaseWaitFewMinutes:
+                    wait = 60 * (attempt + 1)
+                    print(f"[WARN] Instagram says wait a few minutes — sleeping {wait}s (attempt {attempt+1}/3)")
+                    time.sleep(wait)
+                except LoginRequired:
+                    print("[WARN] Login required — rotating proxy and re-logging in...")
+                    ig_login(force_new_proxy=True)
+                except Exception as e:
+                    print(f"[ERROR] _fetch failed: {e}")
+                    raise
+            # Final attempt after waits
+            return ig_client.user_medias_v1(INSTAGRAM_USER_ID, amount=5)
 
         medias = await loop.run_in_executor(None, _fetch)
 
@@ -237,20 +259,19 @@ async def send_post(channel: discord.TextChannel, post: dict):
 
 # ── POLLING TASK ──────────────────────────────────────────────────────────────
 
-@tasks.loop(minutes=1)  # ticks every minute; logic below controls actual firing
+@tasks.loop(minutes=1)
 async def poll_instagram():
-    # Only fire when the internal countdown hits zero
     if not hasattr(poll_instagram, "_next_run"):
         poll_instagram._next_run = datetime.now(tz=timezone.utc).timestamp()
 
     now = datetime.now(tz=timezone.utc).timestamp()
     if now < poll_instagram._next_run:
-        return  # not yet time
+        return
 
-    # Schedule the next run before doing any work
     next_wait = random.uniform(POLL_INTERVAL_MIN * 60, POLL_INTERVAL_MAX * 60)
     poll_instagram._next_run = now + next_wait
     print(f"[{datetime.now().strftime('%H:%M:%S')}] Next check in {next_wait/60:.1f} min")
+
     channel = bot.get_channel(CHANNEL_ID)
     if channel is None:
         print(f"[ERROR] Channel {CHANNEL_ID} not found.")
