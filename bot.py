@@ -91,7 +91,7 @@ async def fetch_posts():
     try:
         loop = asyncio.get_event_loop()
 
-       def _fetch():
+        def _fetch():
             try:
                 medias = ig_client.user_medias_v1(INSTAGRAM_USER_ID, amount=5)
                 return medias
