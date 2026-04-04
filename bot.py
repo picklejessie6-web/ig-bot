@@ -52,23 +52,30 @@ PROXIES = [
 
 # ── INSTAGRAM LOGIN ───────────────────────────────────────────────────────────
 
+# ── INSTAGRAM LOGIN ───────────────────────────────────────────────────────────
+
 def ig_login():
     proxy = random.choice(PROXIES)
     print(f"[INFO] Using proxy: {proxy.split('@')[1]}")
     ig_client.set_proxy(proxy)
-    if Path(SESSION_FILE).exists():
+
+    # Try restoring session from environment variable (survives Railway restarts)
+    session_json = os.environ.get("IG_SESSION")
+    if session_json:
         try:
-            ig_client.load_settings(SESSION_FILE)
+            ig_client.set_settings(json.loads(session_json))
             ig_client.login(IG_USERNAME, IG_PASSWORD)
             ig_client.get_timeline_feed()
-            print("[INFO] Logged in via saved session")
+            print("[INFO] Logged in via session from environment variable")
             return
         except Exception as e:
-            print(f"[WARN] Session login failed: {e}, retrying fresh...")
+            print(f"[WARN] Env session login failed: {e}, retrying fresh...")
 
     ig_client.login(IG_USERNAME, IG_PASSWORD)
+    session_data = json.dumps(ig_client.get_settings())
+    print("[INFO] Logged in fresh — copy the following into Railway as IG_SESSION env var:")
+    print(f"IG_SESSION={session_data}")
     ig_client.dump_settings(SESSION_FILE)
-    print("[INFO] Logged in fresh and saved session")
 
 
 # ── STATE HELPERS ─────────────────────────────────────────────────────────────
@@ -93,12 +100,17 @@ async def fetch_posts():
 
         def _fetch():
             try:
-                medias = ig_client.user_medias_v1(INSTAGRAM_USER_ID, amount=5)
+                # Use the private/authenticated API directly — avoids public 429s
+                user_info = ig_client.user_info_by_username_v1(INSTAGRAM_USERNAME)
+                user_id = user_info.pk
+                medias = ig_client.user_medias_v1(user_id, amount=5)
                 return medias
             except LoginRequired:
                 print("[WARN] Login required, re-logging in...")
                 ig_login()
-                return ig_client.user_medias_v1(INSTAGRAM_USER_ID, amount=5)
+                user_info = ig_client.user_info_by_username_v1(INSTAGRAM_USERNAME)
+                user_id = user_info.pk
+                return ig_client.user_medias_v1(user_id, amount=12)
             except Exception as e:
                 print(f"[ERROR] _fetch failed: {e}")
                 raise
