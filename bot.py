@@ -39,8 +39,22 @@ ig_client.delay_range = [3, 7]
 
 # ── INSTAGRAM LOGIN ───────────────────────────────────────────────────────────
 
+PROXIES = [
+    "http://bytlvdsl:7x6y437b8smy@31.58.9.4:6077",
+    "http://bytlvdsl:7x6y437b8smy@191.96.254.138:6185",
+    "http://bytlvdsl:7x6y437b8smy@142.111.67.146:5611",
+    "http://bytlvdsl:7x6y437b8smy@216.10.27.159:6837",
+    "http://bytlvdsl:7x6y437b8smy@198.105.121.200:6462",
+    "http://bytlvdsl:7x6y437b8smy@107.172.163.27:6543",
+    "http://bytlvdsl:7x6y437b8smy@45.38.107.97:6014",
+]
+
+# ── INSTAGRAM LOGIN ───────────────────────────────────────────────────────────
+
 def ig_login():
-    ig_client.set_proxy("http://bytlvdsl:7x6y437b8smy@198.23.239.134:6540")
+    proxy = random.choice(PROXIES)
+    print(f"[INFO] Using proxy: {proxy.split('@')[1]}")
+    ig_client.set_proxy(proxy)
     if Path(SESSION_FILE).exists():
         try:
             ig_client.load_settings(SESSION_FILE)
