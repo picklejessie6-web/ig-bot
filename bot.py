@@ -3,7 +3,6 @@ load_dotenv()
 import discord
 from discord.ext import commands, tasks
 import os
-import sys
 import json
 import time
 import asyncio
@@ -27,12 +26,12 @@ POLL_INTERVAL_MIN  = 20
 POLL_INTERVAL_MAX  = 60
 STATE_FILE         = "last_post.json"
 DOWNLOAD_DIR       = "ig_downloads"
-SESSION_FILE       = "ig_session.json"
 # ─────────────────────────────────────────────────────────────────────────────
 
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
+
 
 def make_client():
     c = Client()
@@ -41,65 +40,31 @@ def make_client():
 
 ig_client = make_client()
 
-PROXIES = [
-    "http://bytlvdsl:7x6y437b8smy@31.58.9.4:6077",
-    "http://bytlvdsl:7x6y437b8smy@191.96.254.138:6185",
-    "http://bytlvdsl:7x6y437b8smy@142.111.67.146:5611",
-    "http://bytlvdsl:7x6y437b8smy@216.10.27.159:6837",
-    "http://bytlvdsl:7x6y437b8smy@198.105.121.200:6462",
-    "http://bytlvdsl:7x6y437b8smy@107.172.163.27:6543",
-    "http://bytlvdsl:7x6y437b8smy@45.38.107.97:6014",
-]
-
-# Sticky proxy — chosen once at startup, only rotated on explicit failure
-_active_proxy = random.choice(PROXIES)
-
 
 # ── INSTAGRAM LOGIN ───────────────────────────────────────────────────────────
 
-def ig_login(force_new_proxy: bool = False):
-    """
-    Login strategy:
-      1. If IG_SESSION env var exists and we're not forcing a new proxy,
-         restore the session WITHOUT calling .login() again — just load
-         settings and verify with a lightweight API call.
-      2. If session is missing/broken, rebuild the client from scratch
-         and do a fresh login, then print the new session to copy into Railway.
-    """
-    global ig_client, _active_proxy
-
-    if force_new_proxy:
-        _active_proxy = random.choice(PROXIES)
-        print(f"[INFO] Rotating to new proxy: {_active_proxy.split('@')[1]}")
-    else:
-        print(f"[INFO] Using proxy: {_active_proxy.split('@')[1]}")
+def ig_login():
+    global ig_client
 
     session_json = os.environ.get("IG_SESSION")
-    if session_json and not force_new_proxy:
+    if session_json:
         try:
             settings = json.loads(session_json)
-            # Rebuild client from scratch before loading settings to avoid
-            # partial/corrupted state from previous attempts
             ig_client = make_client()
-            ig_client.set_proxy(_active_proxy)
             ig_client.set_settings(settings)
-            # DO NOT call .login() — that registers a new device and triggers
-            # Instagram's "please wait" challenge. Just verify the cookie works.
             ig_client.get_timeline_feed()
             print("[INFO] Session restored from IG_SESSION env var — no fresh login needed")
             return
         except PleaseWaitFewMinutes:
-            print("[WARN] Session cookie valid but Instagram is rate-limiting — will retry at fetch time")
+            print("[WARN] Session valid but Instagram is rate-limiting — will retry at fetch time")
             return
         except Exception as e:
             print(f"[WARN] Saved session invalid ({e}), falling back to fresh login...")
 
-    # Fresh login path — only replace global client once login fully succeeds
     print("[INFO] Performing fresh login (no valid session found)...")
     fresh_client = make_client()
-    fresh_client.set_proxy(_active_proxy)
     fresh_client.login(IG_USERNAME, IG_PASSWORD)
-    ig_client = fresh_client  # only assign if no exception above
+    ig_client = fresh_client
     session_data = json.dumps(ig_client.get_settings())
     print("[INFO] Fresh login successful.")
     print("[ACTION REQUIRED] Set this in Railway → Variables as IG_SESSION:")
@@ -127,22 +92,17 @@ async def fetch_posts():
         loop = asyncio.get_event_loop()
 
         def _fetch():
-            # Retry loop for PleaseWaitFewMinutes (Instagram rate-limit, not auth failure)
             for attempt in range(3):
                 try:
                     medias = ig_client.user_medias_v1(INSTAGRAM_USER_ID, amount=5)
                     return medias
                 except PleaseWaitFewMinutes:
                     wait = 60 * (attempt + 1)
-                    print(f"[WARN] Instagram says wait a few minutes — sleeping {wait}s (attempt {attempt+1}/3)")
+                    print(f"[WARN] Instagram says wait — sleeping {wait}s (attempt {attempt+1}/3)")
                     time.sleep(wait)
                 except LoginRequired:
-                    print("[WARN] Login required — rotating proxy and re-logging in...")
-                    ig_login(force_new_proxy=True)
-                except Exception as e:
-                    print(f"[ERROR] _fetch failed: {e}")
-                    raise
-            # Final attempt after waits
+                    print("[WARN] Login required — re-logging in...")
+                    ig_login()
             return ig_client.user_medias_v1(INSTAGRAM_USER_ID, amount=5)
 
         medias = await loop.run_in_executor(None, _fetch)
