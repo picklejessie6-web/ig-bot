@@ -34,8 +34,12 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-ig_client = Client()
-ig_client.delay_range = [3, 7]
+def make_client():
+    c = Client()
+    c.delay_range = [3, 7]
+    return c
+
+ig_client = make_client()
 
 PROXIES = [
     "http://bytlvdsl:7x6y437b8smy@31.58.9.4:6077",
@@ -59,10 +63,10 @@ def ig_login(force_new_proxy: bool = False):
       1. If IG_SESSION env var exists and we're not forcing a new proxy,
          restore the session WITHOUT calling .login() again — just load
          settings and verify with a lightweight API call.
-      2. Only do a full fresh .login() if there's no saved session or
-         the session is stale/invalid.
+      2. If session is missing/broken, rebuild the client from scratch
+         and do a fresh login, then print the new session to copy into Railway.
     """
-    global _active_proxy
+    global ig_client, _active_proxy
 
     if force_new_proxy:
         _active_proxy = random.choice(PROXIES)
@@ -70,32 +74,35 @@ def ig_login(force_new_proxy: bool = False):
     else:
         print(f"[INFO] Using proxy: {_active_proxy.split('@')[1]}")
 
-    ig_client.set_proxy(_active_proxy)
-
     session_json = os.environ.get("IG_SESSION")
     if session_json and not force_new_proxy:
         try:
             settings = json.loads(session_json)
+            # Rebuild client from scratch before loading settings to avoid
+            # partial/corrupted state from previous attempts
+            ig_client = make_client()
+            ig_client.set_proxy(_active_proxy)
             ig_client.set_settings(settings)
-            # DO NOT call ig_client.login() here — that creates a new device
-            # session and triggers Instagram's "please wait" challenge.
-            # Instead just poke a cheap endpoint to verify the cookie is alive.
+            # DO NOT call .login() — that registers a new device and triggers
+            # Instagram's "please wait" challenge. Just verify the cookie works.
             ig_client.get_timeline_feed()
             print("[INFO] Session restored from IG_SESSION env var — no fresh login needed")
             return
         except PleaseWaitFewMinutes:
-            print("[WARN] Session valid but Instagram is rate-limiting — will retry at fetch time")
+            print("[WARN] Session cookie valid but Instagram is rate-limiting — will retry at fetch time")
             return
         except Exception as e:
-            print(f"[WARN] Saved session invalid ({e}), doing fresh login...")
-            ig_client.set_settings({})  # wipe stale state before fresh login
+            print(f"[WARN] Saved session invalid ({e}), falling back to fresh login...")
 
-    # Fresh login — only runs when there's no valid session
+    # Fresh login path — rebuild client cleanly before attempting
+    print("[INFO] Performing fresh login (no valid session found)...")
+    ig_client = make_client()
+    ig_client.set_proxy(_active_proxy)
     ig_client.login(IG_USERNAME, IG_PASSWORD)
     session_data = json.dumps(ig_client.get_settings())
     print("[INFO] Fresh login successful.")
-    print("[ACTION REQUIRED] Add this to Railway as the IG_SESSION environment variable:")
-    print(f"IG_SESSION={session_data}")
+    print("[ACTION REQUIRED] Set this in Railway → Variables as IG_SESSION:")
+    print(session_data)
 
 
 # ── STATE HELPERS ─────────────────────────────────────────────────────────────
